@@ -1,0 +1,373 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        -32,
+        -112
+      ],
+      "id": "12fdd242-a07f-4ed8-9421-0e02bec5ce56",
+      "name": "When chat message received",
+      "webhookId": "987c0a77-9556-4087-9fa9-df98469ebe44"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a helpful email assistant. Write a polite reply to this sample email:\n\nHi, I placed an order three days ago, but I have not received an update. Could you please tell me its status?\n\nWrite a short, professional reply. Do not claim that you checked the order or know its status.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        240,
+        16
+      ],
+      "id": "51e25f9e-bdfd-47e5-a326-7c8329cb5cd7",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "llama3.2:latest",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        1056,
+        192
+      ],
+      "id": "a018d328-7dc0-41b5-b5b1-da311b0a6943",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "8qZyuNowJlDWIZgd",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "limit": 5,
+        "filters": {
+          "q": "in:inbox -category:promotions -category:social -label:AI_PROCESSED"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        640,
+        -112
+      ],
+      "id": "d369e774-ac1b-4712-a737-68b83f0c9cdc",
+      "name": "Get many messages",
+      "webhookId": "4ddcc012-0b38-4495-a36b-db6dcedb1b51",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "m6idWjVgdOBn3HYh",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Classify the following email snippet.\n\nEMAIL:\n{{ $json.snippet }}\n\nChoose exactly one label.\n\nREPLY_NEEDED: The email is a personal job opportunity message addressed to the recipient and asks them to apply, respond, or show interest. Also use this label for a direct personal question that expects a response.\n\nNO_REPLY_NEEDED: The email is an OTP, verification code, advertisement, newsletter, event promotion, receipt, license notification, automated alert, or contains no meaningful message.\n\nImportant examples:\n- \"Hi AHMED, your background could be a match for this Mobile App Developer role. Please submit an application if interested.\" → REPLY_NEEDED\n- \"Apply for VOYAGEHACK 4.0 now!\" → NO_REPLY_NEEDED\n- \"Your license key is ready\" → NO_REPLY_NEEDED\n- Empty or unreadable snippet → NO_REPLY_NEEDED\n\nReturn only REPLY_NEEDED or NO_REPLY_NEEDED. Do not explain your choice and do not draft a reply.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1072,
+        -208
+      ],
+      "id": "fd5d1687-a2fb-4d8f-be57-6c543e52a89c",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $(\"Get many messages\").all();\n\nfor (const item of items) {\n  const email = item.json;\n\n  // Clean invisible Unicode characters and extra spaces\n  const clean = (value) =>\n    String(value || \"\")\n      .replace(/[\\u200B-\\u200F\\u2060\\uFEFF\\u00AD\\u034F\\u2061-\\u2064]/g, \"\")\n      .replace(/\\s+/g, \" \")\n      .trim();\n\n  // Gmail fields from Get many messages\n  const subject = clean(email.subject || email.Subject);\n  const snippet = clean(email.snippet || email.Snippet);\n  const from = clean(email.from || email.From);\n\n  const text = `${subject} ${snippet}`.toLowerCase();\n  const sender = from.toLowerCase();\n\n  email.cleanSubject = subject;\n  email.cleanSnippet = snippet;\n\n  // 1. Ignore OTPs and verification codes\n  const isOTP =\n    /\\b(otp|one[- ]time password|verification code|security code|login code|password reset code)\\b/i.test(text) ||\n    /\\b(your code is|use this code|code to verify|verify your email)\\b/i.test(text);\n\n  // 2. Identify job alerts that should be reviewed manually\n  const isJobAlert =\n    /\\b(job alert|jobs matching|job recommendations|hiring digest|jobs newsletter)\\b/i.test(text) ||\n    /noreply@glassdoor\\.com/i.test(sender);\n\n  // 3. Identify direct job opportunities\n  const isJob =\n    /\\b(job opportunity|we are hiring|job opening|job offer|interview invitation|shortlisted|recruiter|application status|mobile app developer|apply for this role|submit (a |your )?application|career opportunity|vacancy|vacancies)\\b/i.test(text);\n\n  // 4. Identify order, delivery, booking and customer support emails\n  const isOrderOrSupport =\n    /\\b(order confirmation|order update|order status|order delivered|order shipped|payment received|payment confirmation|payment failed|refund|return request|delivery update|tracking number|booking confirmation|reservation confirmation|support ticket|customer support|issue resolved|your order)\\b/i.test(text);\n\n  // 5. Identify personal messages that may need a response\n  const isPersonal =\n    /\\b(please reply|please respond|get back to me|let me know|could you confirm|can you confirm|please confirm|what do you think|are you available|following up on my email|hope you are doing well)\\b/i.test(text);\n\n  // 6. Identify promotions, advertising and newsletters\n  const isPromotion =\n    /\\b(unsubscribe|newsletter|promotional offer|special offer|limited time offer|discount code|shop now|sale ends|weekly digest|sponsored|cash prizes|exclusive deals|save \\d+%|don't miss out)\\b/i.test(text) ||\n    /\\b(promotions?|advertisement|marketing email|event promotion)\\b/i.test(text) ||\n    /noreply@unstop\\.news/i.test(sender) ||\n    /newsletters-noreply@linkedin\\.com/i.test(sender) ||\n    /\\b(apply for voyagehack|land .* cash prizes)\\b/i.test(text);\n\n  // 7. Classification priority\n  if (!subject && !snippet) {\n    email.classification = \"REVIEW\";\n  } else if (isOTP || isPromotion) {\n    email.classification = \"IGNORE\";\n  } else if (isJobAlert) {\n    email.classification = \"REVIEW\";\n  } else if (isJob || isOrderOrSupport || isPersonal) {\n    email.classification = \"REPLY_NEEDED\";\n  } else {\n    email.classification = \"REVIEW\";\n  }\n\n  // 8. Prepare the IF node boolean condition\n  email.classification = String(email.classification).trim();\n  email.shouldDraft = email.classification === \"REPLY_NEEDED\";\n}\n\nconsole.log(\n  items.map(item => ({\n    subject: item.json.cleanSubject,\n    classification: item.json.classification,\n    shouldDraft: item.json.shouldDraft\n  }))\n);\n\nreturn items;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -176
+      ],
+      "id": "99378ba6-4150-423a-9ad7-9a79f8ffe91b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "0d3e4867-d408-4eb7-9e00-10e55d6029c6",
+              "leftValue": "={{ $json.shouldDraft }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1648,
+        -192
+      ],
+      "id": "1b33bb72-cfc8-42e1-87bf-a8640fbe3062",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an email reply drafting assistant.\n\nRead the email details below and write a polite, professional reply draft.\n\nFrom: {{ $json.From }}\nSubject: {{ $json.cleanSubject }}\nEmail content: {{ $json.cleanSnippet }}\n\nRules:\n1. Reply naturally and professionally.\n2. For job opportunities, express interest only if the email invites an application or response. Do not claim that an application has already been submitted.\n3. For order or customer support emails, answer only using information provided in the email. Never invent order details or promise anything.\n4. For personal emails, respond appropriately to the message.\n5. If the email does not contain enough information to write a safe reply, explain briefly what needs clarification.\n6. Do not send the email. Generate a draft only.\n7. Return only the email reply text, without a subject line or explanation.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1904,
+        -208
+      ],
+      "id": "25a3dc7f-27bb-40ee-b134-8b8ee7a86e0d",
+      "name": "Basic LLM Chain2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"raw\": \"{{ $json.message.raw }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2480,
+        -128
+      ],
+      "id": "d43fc8de-88b5-4a9e-93a4-8c3b2cd7eefe",
+      "name": "HTTP Request",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "m6idWjVgdOBn3HYh",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const reply = $json.text || \"\";\n\nconst subject = $(\"Get many messages\").item.json.Subject || \"\";\nconst from = $(\"Get many messages\").item.json.From || \"\";\n\nconst toMatch = from.match(/<([^>]+)>/);\nconst to = toMatch ? toMatch[1] : from;\n\nconst mime = [\n  `To: ${to}`,\n  `Subject: Re: ${subject}`,\n  \"MIME-Version: 1.0\",\n  \"Content-Type: text/plain; charset=UTF-8\",\n  \"Content-Transfer-Encoding: 8bit\",\n  \"\",\n  reply\n].join(\"\\r\\n\");\n\nconst raw = Buffer.from(mime, \"utf8\")\n  .toString(\"base64\")\n  .replace(/\\+/g, \"-\")\n  .replace(/\\//g, \"_\")\n  .replace(/=+$/, \"\");\n\nreturn {\n  json: {\n    originalEmailId: $(\"Get many messages\").item.json.id,\n    message: { raw }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        -192
+      ],
+      "id": "de4ae9e3-89e0-41c3-8c9e-6738bf18a013",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        368,
+        -208
+      ],
+      "id": "a7d7036a-eda2-4a8e-9279-0ad1bfdf499b",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Code in JavaScript1').item.json.originalEmailId }}",
+        "labelIds": [
+          "Label_5538712322081066341"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2704,
+        -128
+      ],
+      "id": "d864bb78-239a-4528-aa7f-2ddfbbf8496a",
+      "name": "Add label to message",
+      "webhookId": "98a94551-1acb-44c5-8ccd-163da1714eb0",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "m6idWjVgdOBn3HYh",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Basic LLM Chain2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many messages": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Add label to message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "32d2fd6d-0bd2-422c-ab47-4eae703638ed",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "167e178ce3b5380ec66abbe809203c75b4e15cd70940bf98d7768d1c1acd4341"
+  },
+  "nodeGroups": [],
+  "id": "CI7GiS9oa4pN4ucW",
+  "tags": []
+}
